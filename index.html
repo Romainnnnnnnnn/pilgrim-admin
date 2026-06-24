@@ -29760,7 +29760,7 @@
               <span style="font-size:12px;color:#666">HSE</span>
               <span><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:3px 9px;border-radius:20px;background:#e8f5e9;color:#2e7d32">Actif</span></span>
               <div style="display:flex;gap:6px;align-items:center;width:100%">
-                <button style="font-size:11px;padding:5px 10px;border:1px solid #ddd;border-radius:5px;background:#fff;color:#333;cursor:pointer;font-family:inherit;font-weight:600;margin-left:auto" onclick="downloadChimiques()">⬇ PDF</button>
+                <button style="font-size:11px;padding:5px 10px;border:1px solid #111;border-radius:5px;background:#111;color:#fff;cursor:pointer;font-family:inherit;font-weight:600;margin-left:auto" onclick="showChimiquesPage()">Modifier</button>
               </div>
             </div>
           </div>
@@ -30086,6 +30086,18 @@
       </div>
       <div style="padding:32px 24px">
         <div id="wr-hub-content"></div>
+      </div>
+    </div>
+
+
+    <!-- ══ PAGE : Registre Produits Chimiques ══════════════════════════════ -->
+    <div id="page-chimiques" style="display:none;position:fixed;top:0;left:260px;right:0;bottom:0;overflow-y:auto;z-index:50;background:#fff">
+      <div class="topbar">
+        <button class="btn-sm" onclick="closeChimiquesPage()" style="margin-right:8px">← Retour</button>
+        <div class="topbar-title" id="chim-page-title">Registre Produits Chimiques</div>
+      </div>
+      <div style="max-width:900px;margin:0 auto;padding:32px 24px">
+        <div id="chim-page-content"></div>
       </div>
     </div>
 
@@ -32510,7 +32522,7 @@ function showPage(page) {
     editingId = null; // Évite les re-sauvegardes du formulaire caché lors de navigations ultérieures
   }
 
-  ['dashboard','chantiers','new','detail','reunions','reunion-form','incident-form','formations','formation-form','fiche-incident','ldc'].forEach(p => {
+  ['dashboard','chantiers','new','detail','reunions','reunion-form','incident-form','formations','formation-form','fiche-incident','ldc','chimiques'].forEach(p => {
     const el = document.getElementById('page-' + p);
     if (el) el.style.display = 'none';
   });
@@ -33313,16 +33325,19 @@ function _wrRenderSectionCard(sec, container) {
   tasksArea.style.cssText = 'padding:16px';
   sec.tasks.forEach(t => _wrRenderTaskRow(t, sec, tasksArea));
 
-  // Add task button
+  // Add task button (hidden if already 3 tasks)
   const addT = document.createElement('button');
   addT.className = 'btn-sm'; addT.textContent = '＋ Tâche';
   addT.style.marginTop = '6px';
   addT.onclick = () => {
+    if (sec.tasks.length >= 3) { showToast('⚠ Maximum 3 tâches par page', true); return; }
     const t = { id: genId(), label: '', pct: 0, termine: false, photoKey: null, _photoCache: null };
     sec.tasks.push(t);
     _wrRenderTaskRow(t, sec, tasksArea, addT);
+    if (sec.tasks.length >= 3) addT.style.display = 'none';
     _wrAutoSave();
   };
+  if (sec.tasks.length >= 3) addT.style.display = 'none';
   tasksArea.appendChild(addT);
   card.appendChild(tasksArea);
   container.appendChild(card);
@@ -33427,6 +33442,9 @@ function _wrRenderTaskRow(task, sec, container, beforeEl) {
     if (task.photoKey) ImageDB.save(task.photoKey, null);
     if (fileInp.parentNode) fileInp.parentNode.removeChild(fileInp);
     row.remove();
+    // Réafficher le bouton ＋ Tâche si on est passé sous la limite
+    const addBtn = container.querySelector('.btn-sm');
+    if (addBtn && sec.tasks.length < 3) addBtn.style.display = '';
     _wrAutoSave();
   };
 
@@ -36725,6 +36743,204 @@ function _jsiCalc(cid) {
   return { today, joursConsecutifs, semainesSansIncident, joursTotaux, nIncidents,
            startJsiDate, dateDebutD, dateFinD, progress, nomChantier, clientStr, amoStr, ldc, chantier, accidents };
 }
+
+
+// ══ REGISTRE PRODUITS CHIMIQUES ═════════════════════════════════════════
+
+function getChimiques(cid) {
+  try { return JSON.parse(localStorage.getItem('pilgrim_chim_' + cid) || '[]'); } catch(e) { return []; }
+}
+function saveChimiques(cid, arr) { localStorage.setItem('pilgrim_chim_' + cid, JSON.stringify(arr)); }
+function getChimDocs(cid) {
+  try { return JSON.parse(localStorage.getItem('pilgrim_chim_docs_' + cid) || '[]'); } catch(e) { return []; }
+}
+function saveChimDocs(cid, arr) { localStorage.setItem('pilgrim_chim_docs_' + cid, JSON.stringify(arr)); }
+
+function showChimiquesPage() {
+  var cid = detailChantierID;
+  var c = getChantiers().find(function(x){ return x.id === cid; });
+  var title = document.getElementById('chim-page-title');
+  if (title && c) title.textContent = 'Registre Produits Chimiques — ' + c.nom;
+  renderChimiquesSection(cid, document.getElementById('chim-page-content'));
+  document.getElementById('page-chimiques').style.display = 'block';
+  document.getElementById('page-chimiques').scrollTop = 0;
+}
+
+function closeChimiquesPage() {
+  document.getElementById('page-chimiques').style.display = 'none';
+}
+
+function renderChimiquesSection(cid, el) {
+  if (!el) el = document.getElementById('chim-page-content');
+  if (!el) return;
+  var produits = getChimiques(cid);
+  var docs = getChimDocs(cid);
+
+  el.innerHTML = '';
+
+  // Header
+  var hdr = document.createElement('div');
+  hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px';
+  var hdrTitle = document.createElement('div');
+  hdrTitle.style.cssText = 'font-size:13px;font-weight:700;color:var(--text)';
+  hdrTitle.textContent = 'Produits chimiques';
+  var addBtn = document.createElement('button');
+  addBtn.className = 'btn-primary';
+  addBtn.textContent = '＋ Ajouter un produit';
+  addBtn.onclick = function() { addChimique(cid); };
+  hdr.appendChild(hdrTitle); hdr.appendChild(addBtn);
+  el.appendChild(hdr);
+
+  if (produits.length === 0) {
+    var empty = document.createElement('div');
+    empty.className = 'card';
+    empty.innerHTML = '<div class="card-empty"><div class="card-empty-icon">⚗️</div>'
+      + '<div class="card-empty-title">Aucun produit chimique</div>'
+      + '<div class="card-empty-sub" style="margin-bottom:16px">Ajoutez les produits utilisés sur ce chantier</div></div>';
+    var emptyBtn = document.createElement('button');
+    emptyBtn.className = 'btn-primary';
+    emptyBtn.textContent = '＋ Ajouter un produit';
+    emptyBtn.onclick = function() { addChimique(cid); };
+    empty.querySelector('.card-empty').appendChild(emptyBtn);
+    el.appendChild(empty);
+    return;
+  }
+
+  var card = document.createElement('div');
+  card.className = 'card';
+  card.style.marginBottom = '0';
+
+  produits.forEach(function(p) {
+    var pDocs = docs.filter(function(d){ return d.productId === p.id; });
+    var ft   = pDocs.find(function(d){ return d.type==='ft'; });
+    var fds  = pDocs.find(function(d){ return d.type==='fds'; });
+    var fdes = pDocs.find(function(d){ return d.type==='fdes'; });
+
+    // Row wrapper
+    var row = document.createElement('div');
+    row.className = 'list-item';
+    row.style.cssText = 'grid-template-columns:1fr auto auto;align-items:start';
+
+    // Left: name + badges + doc zone
+    var left = document.createElement('div');
+
+    var name = document.createElement('div');
+    name.className = 'list-item-name';
+    name.textContent = '⚗️ ' + p.nom;
+    left.appendChild(name);
+
+    // Badges
+    var badges = document.createElement('div');
+    badges.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:6px';
+    [{t:'ft',label:'Fiche technique',doc:ft},{t:'fds',label:'FDS',doc:fds},{t:'fdes',label:'FDES',doc:fdes}].forEach(function(x) {
+      var b = document.createElement('span');
+      b.style.cssText = 'font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;'
+        + (x.doc ? 'background:#e8f5e9;color:#2e7d32' : 'background:#f5f5f5;color:#aaa');
+      b.textContent = (x.doc ? '✓ ' : '') + x.label;
+      badges.appendChild(b);
+    });
+    left.appendChild(badges);
+
+    // Upload zone (hidden by default)
+    var zone = document.createElement('div');
+    zone.id = 'chim-zone-' + p.id;
+    zone.style.cssText = 'display:none;margin-top:12px';
+    var zoneInner = document.createElement('div');
+    zoneInner.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+
+    [{t:'ft',label:'📄 Fiche technique',doc:ft},{t:'fds',label:'⚠️ FDS',doc:fds},{t:'fdes',label:'🌿 FDES',doc:fdes}].forEach(function(x) {
+      if (x.doc) {
+        var btn = document.createElement('button');
+        btn.style.cssText = 'font-size:12px;padding:6px 14px;border:1.5px solid #2e7d32;border-radius:7px;background:#e8f5e9;color:#2e7d32;cursor:pointer;font-family:inherit;font-weight:600';
+        btn.textContent = '✓ ' + x.label;
+        (function(did){ btn.onclick = function(){ downloadChimDoc(did, cid); }; })(x.doc.id);
+        zoneInner.appendChild(btn);
+      } else {
+        var lbl = document.createElement('label');
+        lbl.style.cssText = 'font-size:12px;padding:6px 14px;border:1.5px solid #ddd;border-radius:7px;background:#fff;color:#555;cursor:pointer;font-family:inherit;font-weight:600;display:inline-block';
+        lbl.textContent = x.label;
+        var inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = '.pdf,.jpg,.jpeg,.png'; inp.style.display = 'none';
+        (function(pid, dt){ inp.onchange = function(){ uploadChimDoc(inp, cid, pid, dt); }; })(p.id, x.t);
+        lbl.appendChild(inp);
+        zoneInner.appendChild(lbl);
+      }
+    });
+    zone.appendChild(zoneInner);
+    left.appendChild(zone);
+    row.appendChild(left);
+
+    // Modifier button
+    var modBtn = document.createElement('button');
+    modBtn.className = 'btn-action primary';
+    modBtn.textContent = 'Modifier';
+    (function(zoneEl, btn) {
+      btn.onclick = function() {
+        var open = zoneEl.style.display === 'block';
+        zoneEl.style.display = open ? 'none' : 'block';
+        btn.textContent = open ? 'Modifier' : 'Fermer';
+      };
+    })(zone, modBtn);
+    row.appendChild(modBtn);
+
+    // Delete button
+    var delBtn = document.createElement('button');
+    delBtn.className = 'btn-action ghost';
+    delBtn.title = 'Supprimer';
+    delBtn.textContent = '✕';
+    (function(pid){ delBtn.onclick = function(){ deleteChimique(pid, cid); }; })(p.id);
+    row.appendChild(delBtn);
+
+    card.appendChild(row);
+  });
+
+  el.appendChild(card);
+}
+
+
+function addChimique(cid) {
+  var nom = prompt('Nom du produit chimique :');
+  if (!nom || !nom.trim()) return;
+  var produits = getChimiques(cid);
+  produits.push({ id: 'chim_' + Date.now(), nom: nom.trim(), dateAjout: new Date().toISOString() });
+  saveChimiques(cid, produits);
+  renderChimiquesSection(cid);
+}
+
+function deleteChimique(productId, cid) {
+  if (!confirm('Supprimer ce produit et ses documents ?')) return;
+  saveChimiques(cid, getChimiques(cid).filter(function(p){ return p.id !== productId; }));
+  saveChimDocs(cid, getChimDocs(cid).filter(function(d){ return d.productId !== productId; }));
+  renderChimiquesSection(cid);
+}
+
+function uploadChimDoc(input, cid, productId, type) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var id = 'chimd_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+    var docs = getChimDocs(cid).filter(function(d){ return !(d.productId===productId && d.type===type); });
+    var now = new Date();
+    var ds = String(now.getDate()).padStart(2,'0') + '/' + String(now.getMonth()+1).padStart(2,'0') + '/' + now.getFullYear();
+    docs.push({ id:id, productId:productId, type:type, filename:file.name, date:ds, size:file.size });
+    saveChimDocs(cid, docs);
+    ImageDB.save('chimd_' + id, e.target.result);
+    renderChimiquesSection(cid);
+    showToast('✓ Document ajouté');
+  };
+  reader.readAsDataURL(file);
+}
+
+async function downloadChimDoc(id, cid) {
+  var data = await ImageDB.load('chimd_' + id);
+  if (!data) { showToast('Fichier introuvable', true); return; }
+  var meta = getChimDocs(cid).find(function(d){ return d.id === id; });
+  var a = document.createElement('a');
+  a.href = data; a.download = meta ? meta.filename : 'document';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
 
 function renderDetailJsi(cid) {
   const container = document.getElementById('detail-jsi-container');
